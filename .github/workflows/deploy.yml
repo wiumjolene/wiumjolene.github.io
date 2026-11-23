@@ -1,0 +1,83 @@
+# Builds https://wiumjolene.github.io from the private Obsidian vault.
+# Only notes with `publish: true` end up on the site (see quartz.config.yaml).
+name: Build and deploy site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+  repository_dispatch: # sent by the vault repo on every push
+    types: [vault-updated]
+  schedule:
+    - cron: "17 3 * * *" # daily safety net (05:17 SAST)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  QUARTZ_VERSION: v5.1.0
+  VAULT_REPO: wiumjolene/wiumjolene-obsidian
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out site settings
+        uses: actions/checkout@v6
+        with:
+          path: site
+
+      - name: Check out Quartz ${{ env.QUARTZ_VERSION }}
+        uses: actions/checkout@v6
+        with:
+          repository: jackyzha0/quartz
+          ref: ${{ env.QUARTZ_VERSION }}
+          path: quartz
+
+      - name: Check out the vault (private)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.VAULT_REPO }}
+          token: ${{ secrets.VAULT_TOKEN }}
+          path: quartz/content
+          fetch-depth: 0 # full history, for page dates
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: quartz/package-lock.json
+
+      - name: Apply site settings
+        run: cp site/quartz.config.yaml quartz/quartz.config.yaml
+
+      - name: Install Quartz
+        working-directory: quartz
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: quartz
+        run: npx quartz build
+
+      - name: Remove links to unpublished notes
+        run: node site/scripts/unlink-unpublished.mjs quartz/public
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: quartz/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
