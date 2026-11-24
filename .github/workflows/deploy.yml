@@ -57,6 +57,9 @@ jobs:
       - name: Apply site settings
         run: cp site/quartz.config.yaml quartz/quartz.config.yaml
 
+      - name: Set page dates on published notes
+        run: node site/scripts/prepare-content.mjs quartz/content
+
       - name: Install Quartz
         working-directory: quartz
         run: npm ci --no-audit --no-fund
